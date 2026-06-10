@@ -11,7 +11,7 @@
 <img width="430" height="245" alt="2" src="https://github.com/user-attachments/assets/45d0b003-6ef8-4792-a2c7-72d2f9429d1a" /> <br />
 
 Θα Βρείτε τα αρχεία "Casino EAP Final.part1 εως part4 ".  <br />
-Δεξί κλικ σε ενα απο τα αρχεία ZIP "Casino EAP Final.part1 εως part4 " --> εξαγωγή Εδώ. <br />
+Δεξί κλικ σε ενα απο τα αρχεία ZIP "Casino EAP Final.part1 εως part4 " --> Εξαγωγή Εδώ. <br />
 <img width="619" height="245" alt="3" src="https://github.com/user-attachments/assets/cc5e103f-d4e1-4a34-a036-49f46538aa44" /> <br />
 
 Ανοίξτε το νέο φάκελο "Casino EAP Final". <br />
