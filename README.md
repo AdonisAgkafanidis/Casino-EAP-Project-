@@ -1,12 +1,12 @@
 # Casino-EAP-Project e-Roulette-ΠΛΗΠΡΟ
 Ένα πρότζεκτ πανεπιστημίου από μια ομάδα 4 ατόμων , μια προσομοίωση ενος απο τα παιχνίδια του Καζίνου η Ρουλέτα.
 
-Κλικ στο Code --> Download ZIP
-<img width="436" height="372" alt="1" src="https://github.com/user-attachments/assets/eb124ddc-d696-449e-9cf5-59fee1ff810a" />
+Κλικ στο Code --> Download ZIP <br />
+<img width="436" height="372" alt="1" src="https://github.com/user-attachments/assets/eb124ddc-d696-449e-9cf5-59fee1ff810a" /> <br />
 
 Βρείτε το αρχείο που κατεβάσατε. Δεξί κλικ στο αρχείο ZIP "Casino-EAP-Project--main" --> εξαγωγή Εδώ
-Ανοίξτε το νέο φάκελο "Casino-EAP-Project--main".
-<img width="430" height="245" alt="2" src="https://github.com/user-attachments/assets/45d0b003-6ef8-4792-a2c7-72d2f9429d1a" />
+Ανοίξτε το νέο φάκελο "Casino-EAP-Project--main". <br />
+<img width="430" height="245" alt="2" src="https://github.com/user-attachments/assets/45d0b003-6ef8-4792-a2c7-72d2f9429d1a" /> <br />
 
 Θα Βρείτε τα αρχεία "Casino EAP Final.part1 εως part4 ". Δεξί κλικ σε ενα απο τα αρχεία ZIP "Casino EAP Final.part1 εως part4 " --> εξαγωγή Εδώ.
 <img width="619" height="245" alt="3" src="https://github.com/user-attachments/assets/cc5e103f-d4e1-4a34-a036-49f46538aa44" />
