@@ -15,7 +15,7 @@
 <img width="619" height="245" alt="3" src="https://github.com/user-attachments/assets/cc5e103f-d4e1-4a34-a036-49f46538aa44" /> <br />
 
 Ανοίξτε το νέο φάκελο "Casino EAP Final". <br />
-<img width="642" height="252" alt="4" src="https//github.com/user-attachments/assets/f4f2140a-58d7-4b06-b2dd-d1818bb3d156" /> <br />
+<img width="642" height="252" alt="4" src="https://github.com/user-attachments/assets/21d4b876-77c4-45fb-95ba-aebd006a5565" /> <br />
 
 Ανοίξτε το νέο φάκελο "dist". <br />
 <img width="314" height="163" alt="5" src="https://github.com/user-attachments/assets/8064a3d9-ace2-47ca-ad67-34ffc64b89c5" /> <br />
