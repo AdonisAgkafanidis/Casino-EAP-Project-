@@ -1,0 +1,593 @@
+import tkinter as tk
+import random
+import math
+from tkinter import *
+import sqlite3
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # Επιτρέπει το γράφημα να εμφανίζεται στο κύριο παράθυρο
+from matplotlib.figure import Figure # Βιβλιοθήκη για το γράφημα
+
+
+class RouletteWheel:
+    wheel_order = [
+        0, 32, 15, 19, 4, 21, 2, 25, 17,
+        34, 6, 27, 13, 36, 11, 30, 8,
+        23, 10, 5, 24, 16, 33, 1, 20,
+        14, 31, 9, 22, 18, 29, 7, 28,
+        12, 35, 3, 26
+    ]
+
+    red_numbers = [
+        1, 3, 5, 7, 9, 12, 14, 16, 18,
+        19, 21, 23, 25, 27, 30, 32, 34, 36
+    ]
+
+    def get_color(self, num):
+        if num == 0:
+            return "green"
+        return "red" if num in self.red_numbers else "black"
+
+
+class RoulettePopup:
+    def __init__(self, parent, target_number, color, dozen, callback):
+        self.callback = callback
+        self.target_number = target_number
+        self.color = color
+        self.dozen = dozen
+
+        self.top = Toplevel(parent)
+        self.top.title("Η Ρουλέτα Γυρίζει!")
+        self.top.geometry("400x600")
+        self.top.configure(bg="#004d00")
+        self.top.resizable(0, 0)
+        self.top.grab_set()
+
+        self.canvas = Canvas(self.top, width=350, height=350, bg="#004d00", highlightthickness=0)
+        self.canvas.pack(pady=15)
+
+        self.cx, self.cy, self.r = 170, 170, 150
+        self.current_angle = 0
+
+        idx = RouletteWheel.wheel_order.index(target_number)
+        num_sectors = 37
+        arc_angle = 360 / num_sectors
+
+        target_angle = 90 - (idx * arc_angle) - (arc_angle / 2)
+
+        self.total_rotation = (target_angle - self.current_angle) % 360 + (360 * 6)  # Περιστροφή 6 φορές
+
+        self.draw_wheel(self.current_angle)  # Εμφάνιση της ρουλέτας πριν την περιστροφή
+
+        self.top.after(500, lambda: self.animate(self.total_rotation, 25))  # Καθυστέρηση περιστροφής ρουλέτας
+
+        self.top.protocol("WM_DELETE_WINDOW",self.close_popup) # Όταν κλείνεις το pop up με το Χ σαν να πατάς ΟΚ
+
+    def draw_wheel(self, start_angle, highlight=False):
+        self.canvas.delete("wheel")
+        self.canvas.delete("indicator")
+        num_sectors = 37
+        arc_angle = 360 / num_sectors
+
+        for i, num in enumerate(RouletteWheel.wheel_order):
+            current_arc_angle = start_angle + (i * arc_angle)
+            fill_color = RouletteWheel().get_color(num)
+
+            self.canvas.create_arc(
+                self.cx - self.r, self.cy - self.r,
+                self.cx + self.r, self.cy + self.r,
+                start=current_arc_angle, extent=arc_angle,
+                fill=fill_color, outline="white", tags="wheel"
+            )
+
+            rad = math.radians(current_arc_angle + arc_angle / 2)
+            tx = self.cx + (self.r - 15) * math.cos(rad)
+            ty = self.cy - (self.r - 15) * math.sin(rad)
+            self.canvas.create_text(
+                tx, ty, text=str(num),
+                fill="white", font=("Arial", 10, "bold"), tags="wheel"
+            )
+
+        self.canvas.create_oval(
+            self.cx - 25, self.cy - 25,
+            self.cx + 25, self.cy + 25,
+            fill="gold", tags="wheel"
+        )
+
+    def animate(self, remaining_rotation, speed):
+        if remaining_rotation <= 0 or speed <= 1.0:
+            self.draw_wheel(self.current_angle, highlight=True)
+            self.show_result()
+            return
+
+        step = speed
+        if remaining_rotation < 180:
+            step = max(1.0, speed * (remaining_rotation / 180))
+
+        self.current_angle = (self.current_angle + step) % 360
+        self.draw_wheel(self.current_angle)
+
+        self.top.after(
+            10, lambda: self.animate(remaining_rotation - step, step)
+        )
+
+    def show_result(self):
+        res_text = f"Αποτέλεσμα: {self.target_number} ({self.color.upper()})"
+        Label(self.top, text=res_text, font=("Arial", 14, "bold"), bg="#004d00", fg="yellow").pack(pady=10)
+
+        btn_ok = Button(self.top, text="OK", font=("Arial", 11, "bold"), width=10, bg="gold", command=self.close_popup)
+        btn_ok.pack(pady=5)
+
+    def close_popup(self):
+        self.callback(self.target_number, self.color, self.dozen)
+        self.top.destroy()
+
+
+class RouletteGame:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("EAP Casino")
+        self.root.configure(bg="#004d00")
+
+        # Δεδομένα
+        self.init_db()
+
+        # Player & Bot μεταβλητές
+        self.balance = 300  # Χρήματα παίκτη
+        self.bots = {
+            "Bot 1": {"balance": 300, "current_bet": None, "active": True},
+            "Bot 2": {"balance": 300, "current_bet": None, "active": True},
+            "Bot 3": {"balance": 300, "current_bet": None, "active": True}
+        }
+
+        self.current_bets = {} # Λεξικό ποσό σε χρήματα απο τα πονταρίσματα
+        self.bet_buttons = {} # Λεξικό πονταρισμάτων ιστορικού
+        self.is_spinning = False
+
+        # Λίστα κόκκινων αριθμών
+        self.red_numbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
+
+        # Επιλογή ποσού πονταρίσματος: 5€, 10€, 20€
+        self.chip_selection = tk.IntVar(value=5) # Ξεκινάει με 5
+
+        # Συχνότητες εμφάνισης αριθμών
+        self.freq = [0] * 37 # Δημιουργεί 37 αριθμούς για το 0-36 όλοι ξεκινούν με το 0
+        self.load_frequencies_from_db()
+
+        self.setup_ui()  # Γραφικό περιβάλλον
+        self.update_hints()
+        self.update_history_display()
+        self.update_frequency_chart() # Ενημέρωση Γράφημα συχνότητας
+
+    def check_winner(self):
+
+        # Παίχτης έχασε το παίχνιδι
+        if self.balance <= 0:
+            self.status_label.config(
+                text="GAME OVER - ΧΑΣΑΤΑ ΤΟ ΠΑΙΧΝΙΔΙ!",
+                fg="red"
+            )
+            self.is_spinning = True
+            return
+
+        # Τα Bots έχασαν
+        bots_alive = False
+
+        for data in self.bots.values():
+            if data["balance"] > 0:
+                bots_alive = True
+                break
+
+        if not bots_alive:
+            self.status_label.config(
+                text="ΣΥΓΧΑΡΗΤΗΡΙΑ! ΚΕΡΔΙΣΕΣ!",
+                fg="gold"
+            )
+            self.is_spinning = True
+
+    def init_db(self):
+        # Δημιουργεί τις δομές βάσης δεδομένων και πινάκων, εάν δεν υπάρχουν
+        self.conn = sqlite3.connect("roulette_history.db")
+        self.cursor = self.conn.cursor()
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS spins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                number INTEGER,
+                color TEXT,
+                dozen TEXT
+            )
+        ''')
+        self.conn.commit()
+
+    def load_frequencies_from_db(self):
+        # Εισάγει τις συχνότητες των συνεδριών χρησιμοποιώντας ιστορικά δεδομένα βάσης δεδομένων
+        try:
+            self.cursor.execute("SELECT number FROM spins")
+            rows = self.cursor.fetchall()
+            for row in rows:
+                num = row[0]
+                if 0 <= num <= 36:
+                    self.freq[num] += 1
+        except sqlite3.Error:
+            pass
+
+    def setup_ui(self):
+        main_container = tk.Frame(self.root, bg="#004d00")
+        main_container.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        left_frame = tk.Frame(main_container, bg="#004d00")
+        left_frame.pack(side=tk.LEFT, padx=10, fill=tk.Y)
+
+        header = tk.Frame(left_frame, bg="#004d00", pady=10)
+        header.pack()
+
+        info_frame = tk.Frame(header, bg="#004d00")
+        info_frame.pack(side=tk.LEFT)
+        self.balance_label = tk.Label(info_frame, text=f"WALLET: {self.balance}€",
+                                      font=("Arial", 20, "bold"), bg="#004d00", fg="gold")
+        self.balance_label.pack()
+
+        table_frame = tk.Frame(left_frame, bg="#004d00")
+        table_frame.pack(pady=10)
+
+        # Επιλογή 0
+        btn_0 = tk.Button(table_frame, text="0", bg="#006400", fg="white", width=6, height=7,
+                          font=("Arial", 10, "bold"), command=lambda: self.place_bet(0))
+        btn_0.grid(row=0, column=0, rowspan=3, padx=2, sticky="nsew")
+        self.bet_buttons[0] = btn_0
+
+        # Αριθμοί 1-36
+        layout = [[3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36],
+                  [2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35],
+                  [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34]]
+
+        for r in range(3):
+            for c in range(12):
+                n = layout[r][c]
+                col = "red" if n in self.red_numbers else "black"
+                btn = tk.Button(table_frame, text=str(n), bg=col, fg="white", width=6, height=2,
+                                font=("Arial", 10, "bold"), command=lambda num=n: self.place_bet(num))
+                btn.grid(row=r, column=c + 1, padx=1, pady=1)
+                self.bet_buttons[n] = btn
+
+        # Δωδεκάδες
+        dozens = [("1st 12", "1st-12"), ("2nd 12", "2nd-12"), ("3rd 12", "3rd-12")]
+        for i, (txt, val) in enumerate(dozens):
+            btn = tk.Button(table_frame, text=txt, bg="#003300", fg="white", height=2, width=12,
+                            font=("Arial", 10, "bold"), command=lambda v=val: self.place_bet(v))
+            btn.grid(row=3, column=i * 4 + 1, columnspan=4, sticky="nsew", pady=2)
+            self.bet_buttons[val] = btn
+
+        # Εξωτερικά πονταρίσματα
+        outside = [("1-18", "1-18"), ("Even", "Even"), ("RED", "Red"),
+                   ("BLACK", "Black"), ("Odd", "Odd"), ("19-36", "19-36")]
+        for i, (txt, val) in enumerate(outside):
+            bg_c = "red" if txt == "RED" else "black" if txt == "BLACK" else "#003300"
+            btn = tk.Button(table_frame, text=txt, bg=bg_c, fg="white", height=2, width=6,
+                            font=("Arial", 9, "bold"), command=lambda v=val: self.place_bet(v))
+            btn.grid(row=4, column=i * 2 + 1, columnspan=2, sticky="nsew", pady=2)
+            self.bet_buttons[val] = btn
+
+        chip_frame = tk.Frame(left_frame, bg="#004d00", pady=15)
+        chip_frame.pack()
+
+        tk.Label(chip_frame, text="ΕΠΙΛΟΓΗ ΜΑΡΚΑΣ:", bg="#004d00", fg="white",
+                 font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=10)
+
+        for val in [5, 10, 20]:
+            tk.Radiobutton(chip_frame, text=f"{val}€", variable=self.chip_selection, value=val,
+                           indicatoron=0, width=8, font=("Arial", 11, "bold"),
+                           bg="#222", fg="white", selectcolor="#D4AF37",
+                           activebackground="yellow").pack(side=tk.LEFT, padx=4)
+
+        tk.Button(left_frame, text="SPIN WHEEL", font=("Arial", 22, "bold"), bg="gold",
+                  fg="black", width=15, command=self.spin).pack(pady=5)
+
+        tk.Button(left_frame, text="Clear All Bets", bg="#8b0000", fg="white",
+                  command=self.clear_bets, width=15).pack()
+
+        self.status_label = tk.Label(left_frame, text="Τοποθετήστε τα στοιχήματά σας",
+                                     font=("Arial", 14), bg="#004d00", fg="white")
+        self.status_label.pack(pady=10)
+
+        self.hints_label = tk.Label(left_frame, text="Hints: Υπολογισμός...", bg="#004d00", fg="lightgreen",
+                                    font=("Arial", 10, "italic"), justify=tk.LEFT)
+        self.hints_label.pack(pady=5)
+
+        self.history_label = tk.Label(left_frame, text="History: -", bg="#004d00", fg="white", font=("Arial", 10))
+        self.history_label.pack()
+
+        self.right_frame = tk.LabelFrame(main_container, text=" ANTΙΠΑΛΟΙ (BOTS) ", bg="#003300", fg="white",
+                                         font=("Arial", 12, "bold"), padx=10, pady=10)
+        self.right_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
+
+        self.bot_labels = {}
+        for bot_name in self.bots:
+            bot_box = tk.Frame(self.right_frame, bg="#002200", bd=2, relief="groove", pady=5, padx=5)
+            bot_box.pack(fill=tk.X, pady=5)
+
+            lbl = tk.Label(bot_box, text=f"{bot_name}: 300€\nΠοντάρισμα: -", bg="#002200", fg="white",
+                           font=("Arial", 10), justify=tk.LEFT)
+            lbl.pack(anchor="w")
+            self.bot_labels[bot_name] = lbl
+
+        graph_frame = tk.Frame(main_container, bg="#004d00") # Δημιουργία σημείου εμφάνισης γραφήματος
+        graph_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10) # Τοποθέτηση γραφήματος στα δεξιά
+
+        self.fig = Figure(figsize=(5, 7), dpi=100) # Μέγεθος και ανάλυση γραφήματος
+        self.ax = self.fig.add_subplot(111) # Δημιουγία 1 στήλη , 1 Γραμή και 1 γράφημα
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_frame) # Ενώνουμε το γράφημα στο γραφικό περιβάλλον
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True) # Εμφανιση το γραφήμα στο γραφικό περιβάλλον
+
+        # Κουμπί μηδενισμός των στατιστικών
+        tk.Button(left_frame,text="Reset Statistics",bg="#4444aa",fg="white",
+                  command=self.reset_statistics,width=15).pack(pady=3)
+
+    def place_bet(self, bet_type):
+        # Πονταρίσματα τσιπ απο Χρήστες
+        if self.is_spinning:  # Δεν επιτρέπει το ποντάρισμα όταν περιστρέφετε η ρουλέτα
+            return
+
+        chip_value = self.chip_selection.get()  # Διαβάζει επιλογές & ποσό πονταρίσματος
+        if self.balance < chip_value:  # Έλεγχος εαν επαρκούν τα χρήματα.
+            self.status_label.config(text="Ανεπαρκές υπόλοιπο χρημάτων!", fg="orange")  # εμφάνιση υπολοιπού χρήματων
+            return
+
+        self.balance -= chip_value  # αφαίρεση τα ποσά ποντάραμε απο τα χρήματα
+        self.current_bets[bet_type] = self.current_bets.get(bet_type,
+                                                            0) + chip_value  # επιτρέπει πολλά πονταρίσματα μαζί
+        self.balance_label.config(text=f"WALLET: {self.balance}€")  # αλλαγή του ποσού χρημάτων
+
+        self.bet_buttons[bet_type].config(fg="gold")  # να κιτρινίζει τα επιλεγμένα πονταρίσματα
+        self.status_label.config(text=f"Πονταρίσματα: {sum(self.current_bets.values())}€",
+                                 fg="white")  # εμφάνιση σύνολο ποντάρισματων γύρου
+
+    def clear_bets(self):
+        # Καθαρίζει τα ενεργά πονταρίσματα του ταμπλό και επαναφέρει τα χαρακτηριστικά του κειμένου του κουμπιού
+
+        if self.is_spinning:  # Δεν επιτρέπει το ποντάρισμα όταν περιστρέφετε η ρουλέτα
+            return
+        for bet_type, amount in self.current_bets.items():
+            self.balance += amount
+        self.current_bets.clear()
+        self.balance_label.config(text=f"WALLET: {self.balance}€")
+        self.reset_button_labels()
+        self.status_label.config(text="Τα στοιχήματα ακυρώθηκαν", fg="white")
+
+    def reset_statistics(self):
+        # Μηδενισμός στατιστικών και ιστορικού.
+
+        # Μηδενισμός πίνακα συχνοτήτων
+        self.freq = [0] * 37
+
+        # Διαγραφή ιστορικού από τη βάση
+        try:
+            self.cursor.execute("DELETE FROM spins")
+            self.conn.commit()
+        except sqlite3.Error:
+            pass
+
+        # Ενημέρωση εμφάνισης
+        self.history_label.config(text="Ιστορικό (Τελευταία 8): -")
+        self.hints_label.config(
+            text="Συμβουλή: Οι πιθανότητες είναι ισορροπημένες αυτή τη στιγμή."
+        )
+
+        self.update_frequency_chart()
+
+        self.status_label.config(
+            text="Τα στατιστικά μηδενίστηκαν!",
+            fg="lightgreen"
+        )
+
+    def reset_button_labels(self):
+        # Επαναφέρει τα χρώματα του κουμπιών.
+        for target, btn in self.bet_buttons.items():
+            btn.config(fg="white")
+
+    def simulate_bot_bets(self):
+        # Δημιουργεί τυχαίες επιλογές για τα bot.
+        bet_options = list(self.bet_buttons.keys())
+        chip_options = [5, 10, 20]
+
+        for name, data in self.bots.items():
+            if not data["active"] or data["balance"] < 5:  # Έλεγχος αν είναι Bot & επαρκή χρήματα
+                data["active"] = False
+                self.bot_labels[name].config(text=f"{name}: ΧΡΕΩΚΟΠΗΜΕΝΟΣ", fg="red")
+                continue
+            # Τυχαίες επιλογές
+            chosen_chip = random.choice([c for c in chip_options if c <= data["balance"]])
+            chosen_target = random.choice(bet_options)
+
+            data["balance"] -= chosen_chip  # Ενημέρωση Data
+            data["current_bet"] = {"target": chosen_target, "amount": chosen_chip}
+            self.bot_labels[name].config(
+                text=f"{name}: {data['balance']}€\nΠόνταρε: {chosen_chip}€ στο {chosen_target}", fg="lightgray")
+
+    def spin(self):
+        if self.is_spinning:  # Δεν επιτρέπει το ποντάρισμα όταν περιστρέφετε η ρουλέτα
+            return
+
+        if not self.current_bets:  # Έλεγχος εαν έχεις ποντάρει
+            self.status_label.config(
+                text="Πρέπει να ποντάρετε τουλάχιστον 5€!",
+                fg="red"
+            )
+            return
+
+        self.is_spinning = True  # Ρουλέτα γυρνάει
+
+        self.simulate_bot_bets()  # Τυχαία πονταρίσματα Bot
+
+        winning_num = random.randint(0, 36)  # Αριθμός που κερδίζει, τυχαίος ακέραιος αριθμός
+
+        color = (
+            "Red"
+            if winning_num in self.red_numbers
+            else "Black"
+            if winning_num != 0
+            else "Green"
+        )
+
+        dozen = "None"
+
+        if 1 <= winning_num <= 12:
+            dozen = "1st-12"
+        elif 13 <= winning_num <= 24:
+            dozen = "2nd-12"
+        elif 25 <= winning_num <= 36:
+            dozen = "3rd-12"
+
+        RoulettePopup(
+            self.root,
+            winning_num,
+            color,
+            dozen,
+            self.popup_finished
+        )
+
+    def popup_finished(self, number, color, dozen):
+        self.resolve_round(number)
+
+    def resolve_round(self, winning_num):
+        # Υπολογίζει τις αποδόσεις κερδών αποτελεσμάτων και δεσμεύει ιστορικούς πόντους.
+        color = "Red" if winning_num in self.red_numbers else "Black" if winning_num != 0 else "Green"
+
+        dozen = "None"
+        if 1 <= winning_num <= 12:
+            dozen = "1st-12"
+        elif 13 <= winning_num <= 24:
+            dozen = "2nd-12"
+        elif 25 <= winning_num <= 36:
+            dozen = "3rd-12"
+
+        self.freq[winning_num] += 1  # Πρόσθετη τοω αριθμό που κέρδισε στη συχνότητα +1
+
+        try:
+            self.cursor.execute("INSERT INTO spins (number, color, dozen) VALUES (?, ?, ?)",
+                                (winning_num, color, dozen))
+            self.conn.commit()
+        except sqlite3.Error:
+            pass
+
+        winnings = 0  # Κέρδος ξεκινάει με 0
+        for target, amount in self.current_bets.items():
+            winnings += self.calculate_bet_payout(target, amount, winning_num, color, dozen)
+
+        self.balance += winnings
+        self.balance_label.config(text=f"WALLET: {self.balance}€")
+
+        for name, data in self.bots.items():
+            if data["current_bet"]:
+                b_target = data["current_bet"]["target"]
+                b_amount = data["current_bet"]["amount"]
+                b_win = self.calculate_bet_payout(b_target, b_amount, winning_num, color, dozen)
+                data["balance"] += b_win
+                status_txt = f"Κέρδισε {b_win}€!" if b_win > 0 else "Έχασε."
+                self.bot_labels[name].config(text=f"{name}: {data['balance']}€\n{status_txt}")
+                data["current_bet"] = None
+
+        round_summary = f"Το {winning_num} ({color}) κέρδισε! "
+        round_summary += f"Κερδίσατε: {winnings}€" if winnings > 0 else "Χάσατε!"
+        self.status_label.config(text=round_summary, fg="gold" if winnings > 0 else "white")
+
+        self.current_bets.clear()
+        self.reset_button_labels()
+        self.update_hints()
+        self.update_history_display()
+        self.update_frequency_chart()
+        self.check_winner() # Έλεγχος νικητή
+
+        if self.balance > 0 and any(bot["balance"] > 0 for bot in self.bots.values()): # Έλεγχος αν τα bot έχουν χρήματα
+            self.is_spinning = False # Έλεγχος ολοκλήρωσης γύρου και επιτρέπει το παίκτη να παίξει
+
+    def calculate_bet_payout(self, target, amount, winning_num, color, dozen):
+        # Υπολογισμός για τα Κέρδη.
+        if target == winning_num:
+            return amount * 36
+        if target == color:
+            return amount * 2
+        if target == dozen:
+            return amount * 3
+        if target == "Even" and winning_num != 0 and winning_num % 2 == 0:
+            return amount * 2
+        if target == "Odd" and winning_num != 0 and winning_num % 2 != 0:
+            return amount * 2
+        if target == "1-18" and 1 <= winning_num <= 18:
+            return amount * 2
+        if target == "19-36" and 19 <= winning_num <= 36:
+            return amount * 2
+        return 0
+
+    def update_hints(self):
+        # Εμφανίζει μετρήσεις λογικής παρακολούθησης με βάση τις σειρές.
+        try:
+            self.cursor.execute("SELECT color FROM spins ORDER BY id DESC LIMIT 5")
+            # Safely unpack row element items
+            last_colors = [row[0] for row in self.cursor.fetchall()]
+        except (sqlite3.Error, IndexError):
+            last_colors = []
+
+        red_count = last_colors.count("Red")
+        black_count = last_colors.count("Black")
+
+        hint_text = "Συμβουλή: "
+        if red_count >= 4:
+            hint_text += "Το Μαύρο έχει καθυστερήσει (Streak Κόκκινου)."
+        elif black_count >= 4:
+            hint_text += "Το Κόκκινο έχει καθυστερήσει (Streak Μαύρου)."
+        else:
+            hint_text += "Οι πιθανότητες είναι ισορροπημένες αυτή τη στιγμή."
+        self.hints_label.config(text=hint_text)
+
+    def update_history_display(self):
+        # Iστορικό παρακολούθησης τελευταίων 8 αποτελεσμάτων.
+        try:
+            self.cursor.execute("SELECT number FROM spins ORDER BY id DESC LIMIT 8")
+            history = [str(row[0]) for row in self.cursor.fetchall()]
+        except (sqlite3.Error, IndexError):
+            history = []
+
+        self.history_label.config(text=f"Ιστορικό (Τελευταία 8): {', '.join(history) if history else '-'}")
+
+    def update_frequency_chart(self):
+        # Τοποθετεί τους αριθμούς στον άξονας Y και τις συχνότητες στον άξονας X.
+        self.ax.clear() # Διαγραφή παλιών μπαρών
+        colors = [] # Λίστα για χρώματα
+        for i in range(37): # Διαπέραση απο τους αριθμούς
+            if i == 0: # Έλεγχος χρώματος αν είναι 0 τότε πράσινο
+                colors.append("green")
+            elif i in self.red_numbers: # εαν είναι στη λίστα red_numbers τότε κόκκινο
+                colors.append("red")
+            else:
+                colors.append("black") # αλλιώς μαύρο
+
+        self.ax.barh(range(37), self.freq, color=colors, edgecolor="white", height=0.7) # Δημιουργεί τις μπάρες του γραφήματος
+
+        self.ax.set_title("Συχνότητα Εμφάνισης Αριθμών", color="gold", fontsize=10, pad=10)
+        self.ax.set_ylabel("Αριθμοί Ρουλέτας", color="gold", fontsize=10)
+        self.ax.set_xlabel("Φόρες Εμφάνισης", color="gold", fontsize=10)
+
+        self.ax.set_yticks(range(37)) # Αριθμοί στον άξονα Υ
+        self.ax.set_facecolor("#003300") # Χρώμα παρασκηνίου
+        self.fig.patch.set_facecolor("#004d00") # Χρώμα παρασκήνιο γραφήματος
+        self.ax.tick_params(colors="white", labelsize=7) # Χρώμα μέγεθος στον άξονα Χ
+
+        max_freq = max(self.freq) if max(self.freq) > 0 else 1 # Έλεγχος για τη μεγαλύτερη συχνότητα, φτιάχνει μια λίστα χώρις 0
+        self.ax.set_xticks(range(0, max_freq + 2)) # Προσθέτει στον άξονα Χ ακόμα δυο αριθμούς
+
+        self.fig.tight_layout() # Ρύθμιση αποστάσεων αυτόματα
+        self.canvas.draw() # Ανανέωση γραφήματος
+
+    def __del__(self):
+        # Διασφαλίζει τον χειρισμό του καθαρισμού των πόρων σε περίπτωση καταστροφής.
+        try:
+            self.conn.close()
+        except:
+            pass
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.iconbitmap('CasinoEAP.ico')  # Εικόνα ico στο παράθυρο αριστερά
+    app = RouletteGame(root)
+    root.mainloop()
+
